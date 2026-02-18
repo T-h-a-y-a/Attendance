@@ -2,12 +2,11 @@
 import axios from "axios";
 
 /**
- * Vercel env you have: VITE_API_URL = https://attendance-4-udnh.onrender.com/api
- *
- * This code supports both:
- *  - VITE_API_URL = https://domain.com/api
- *  - VITE_API_URL = https://domain.com
- * and normalizes to always have ".../api" once.
+ * Vercel env: VITE_API_URL = https://attendance-4-udnh.onrender.com/api
+ * Supports:
+ *  - https://domain.com/api
+ *  - https://domain.com
+ * Normalizes to end with /api exactly once.
  */
 const raw = import.meta.env.VITE_API_URL || "";
 const cleaned = raw.replace(/\/$/, ""); // remove trailing "/"
@@ -34,27 +33,49 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// ✅ logout ONLY on 401/403 (but skip has-super)
+// --- helpers ---
+const isAuthEndpoint = (url = "") =>
+  url.includes("/auth/login") ||
+  url.includes("/auth/setup-super") ||
+  url.includes("/auth/has-super");
+
+const isAlreadyOnLoginPage = () => {
+  try {
+    return window.location.pathname === "/login";
+  } catch {
+    return false;
+  }
+};
+
+const clearAuthStorage = () => {
+  localStorage.removeItem("token");
+  localStorage.removeItem("role");
+  localStorage.removeItem("adminId");
+  localStorage.removeItem("email");
+  localStorage.removeItem("scope");
+};
+
+// ✅ logout ONLY on 401/403 for protected endpoints
 api.interceptors.response.use(
   (res) => res,
   (err) => {
     const status = err?.response?.status;
     const url = err?.config?.url || "";
 
-    // ✅ DO NOT force logout for has-super endpoint
-    if ((status === 401 || status === 403) && url.includes("/auth/has-super")) {
+    // If it is an auth-related endpoint, NEVER force logout/redirect.
+    // (login can return 401 legitimately)
+    if ((status === 401 || status === 403) && isAuthEndpoint(url)) {
       return Promise.reject(err);
     }
 
+    // For other endpoints: handle unauthorized
     if (status === 401 || status === 403) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("role");
-      localStorage.removeItem("adminId");
-      localStorage.removeItem("email");
-      localStorage.removeItem("scope");
+      clearAuthStorage();
 
-      // replace avoids back-loop
-      window.location.replace("/login");
+      // Avoid redirect loop if already on login page
+      if (!isAlreadyOnLoginPage()) {
+        window.location.replace("/login");
+      }
     }
 
     return Promise.reject(err);
